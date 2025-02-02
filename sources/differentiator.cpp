@@ -1,6 +1,9 @@
 #include <assert.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <colors.h>
 #include <commoner.h>
@@ -8,7 +11,7 @@
 
 //*__________________________DSL___________________________
 #define NUM_(val)         ctor_node(NUM_T, val,  NULL,  NULL)
-#define X_                ctor_node(ARG_T,   1,  NULL,  NULL)
+#define VAR_              ctor_node(VAR_T,   1,  NULL,  NULL)
 #define ADD_(left, right) ctor_node(OP_T, ADD_T, left, right)
 #define SUB_(left, right) ctor_node(OP_T, SUB_T, left, right)
 #define MUL_(left, right) ctor_node(OP_T, MUL_T, left, right)
@@ -24,7 +27,7 @@
 #define  CH_(right)       ctor_node(OP_T,  CH_T, NULL, right)
 #define  TH_(right)       ctor_node(OP_T,  TH_T, NULL, right)
 
-#define DIFF(node)  get_diff(node)
+#define DIFF(node)  get_node_diff(node)
 #define  CPY(node) copy_node(node)
 #define  DEL(node) dtor_node(node)
 
@@ -32,17 +35,23 @@
 #define R_ node->right
 //*________________________________________________________
 
-static const int MAX_EXPRESSION_SIZE = 500;
+static const int MAX_EXPRESSION_SIZE   = 500;
+static const int MAX_OPERATOR_STR_SIZE =  20;
+static const int MAX_NUMBER_STR_SIZE   =  20;
+static const int MAX_VARIABLE_STR_SIZE =  20;
 
-static math_node* scan_node(const char* src);
 static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_node* right);
 static math_node* copy_node(const math_node* node);
-static math_node* get_diff (const math_node* node);
+static math_node* get_node_diff (const math_node* node);
+static int scan_node(const char* src, int* shift, math_node** node);
+static int scan_op  (const char* src, int* shift, int*        val );
+static int scan_num (const char* src, int* shift, int*        val );
+static int scan_var (const char* src, int* shift, int*        val );
 static int print_node (const math_node* node, char* src);
-static int dtor_node(math_node* node);
+static int dtor_node  (math_node* node);
 static int calc_node  (const math_node* node, int x_val, int* total);
 
-int scan_expr(root_t* root, const char* const file_name) {
+int        scan_expr(root_t* root, const char* const file_name) {
     assert(file_name);
 
     char* data = (char*)calloc(MAX_EXPRESSION_SIZE, sizeof(char));
@@ -55,12 +64,128 @@ int scan_expr(root_t* root, const char* const file_name) {
     fread(data, sizeof(char), MAX_EXPRESSION_SIZE, input_std);
     fclose(input_std);
 
-    root->start = scan_node(data);
+    int shift = 0;
+
+    if (scan_node(data, &shift, &root->start)) {
+        LOG_FATAL("%s\nERROR BROCKEN EXPESION\nNO DATA SCANNED\n", data);
+        dtor_node(root->start);
+    }
 
     free(data);
 
     return 0;
 }
+static int scan_node(const char* src, int* shift, math_node** place) {
+    LOG_BLUE("shift : %d\n", *shift);
+    assert(src);
+    if (src[*shift] != '(') return 1;
+    ++*shift;
+
+    if (src[*shift] == 'N' && src[*shift + 1] == ')') {
+        *shift += 2;
+        *place = NULL;
+        return 0;
+    }
+
+    math_node* node = ctor_node(OP_T, 0, NULL, NULL);
+    if (node == NULL) {
+        LOG_FATAL("CANNOT CREATE NODE\n");
+
+        LOG_YELLOW("%s\n", src);
+
+        char* arrow = (char*)calloc(*shift + 1, sizeof(char));
+        memset(arrow, '_', *shift - 1);
+        arrow[*shift] = '^';
+        LOG_RED("%s (start position)\n", arrow);
+        free(arrow);
+
+        return 1;
+    }
+
+    *place = node;
+
+    if (src[*shift] == '(') {
+        LOG_PURPLE("shift : %d\n", *shift);
+        if (scan_node(src, shift, &L_       )) return 1;
+        LOG_PURPLE("shift : %d\n", *shift);
+        if (scan_op  (src, shift, &node->val)) return 1;
+        LOG_PURPLE("shift : %d\n", *shift);
+        if (scan_node(src, shift, &R_       )) return 1;
+    }
+    else if(isdigit(src[*shift]) || isdigit(src[*shift + 1]) && (src[*shift] == '+' || src[*shift] == '-')) {
+        node->type = NUM_T;
+        if (scan_num (src, shift, &node->val)) return 1;
+    }
+    else if(isalpha(src[*shift])) {
+        node->type = VAR_T;
+        if (scan_var (src, shift, &node->val)) return 1;
+    }
+    else return 1;
+
+    if (src[*shift] != ')') return 1;
+    ++*shift;
+
+    return 0;
+}
+
+static int scan_op  (const char* src, int* shift, int* val) {
+    char operator_[MAX_OPERATOR_STR_SIZE] = {};
+    int delta = 0;
+
+    sscanf(src + *shift, "%[a-z*/^+-]%n", operator_, &delta);
+    *shift += delta;
+
+    if (src[*shift] != '(') {
+        LOG_FATAL("OPERATOR NOT FULL\n");
+        return 1;
+    }
+
+    for(size_t i = 0; i < sizeof OPERATORS; ++i) if (!strcmp(OPERATORS[i].name, operator_)) {
+        *val = OPERATORS[i].value;
+        return  0;
+    }
+    LOG_FATAL("NO SUCH OPERATOR %s\n", operator_);
+    return 1;
+}
+static int scan_num (const char* src, int* shift, int* val) {
+    char number[MAX_NUMBER_STR_SIZE] = {};
+    int delta = 0;
+
+    sscanf(src + *shift, "%[0-9.]%n", number, &delta);
+    *shift += delta;
+
+    if (strrchr(number, '.') != strchr(number, '.')) {
+        LOG_FATAL("TWO DOTS IN NUMBER: %s\n", number);
+        return 1;
+    }
+    if (number[0] == '.' || number[strlen(number) - 1] == '.') {
+        LOG_FATAL("DOT IN NUMBER ON WRONG POSITION: %s\n", number);
+        return 1;
+    }
+    if (strlen(number) > 9) {
+        LOG_FATAL("TOO LONG NUMBER: %s\n", number);
+        return 1;
+    }
+
+    *val = atoi(number);
+    return 0;
+}
+static int scan_var (const char* src, int* shift, int* val) {
+    char variable[MAX_VARIABLE_STR_SIZE] = {};
+    int delta = 0;
+
+    sscanf(src + *shift, "%[a-z]%n", variable, &delta);
+    *shift += delta;
+
+    if (strcmp(variable, "x")) {
+        LOG_FATAL("ONLY \"x\" CAN BE VARIABLE NOT \"%s\"\n", variable);
+        return 1;
+    }
+
+    *val = 1;
+    return 0;
+}
+
 
 root_t* ctor_expr () {
     root_t* root = (root_t*)calloc(1, sizeof(root_t));
@@ -70,8 +195,7 @@ root_t* ctor_expr () {
     }
     return root;
 }
-
-int dtor_expr (root_t* root) {
+int     dtor_expr (root_t* root) {
     assert(root);
 
     dtor_node(root->start);
@@ -79,64 +203,7 @@ int dtor_expr (root_t* root) {
 
     return 0;
 }
-static int dtor_node(math_node* node) {
-    if (!node) return 0;
-    dtor_node(L_);
-    dtor_node(R_);
-    free(node);
-    return 0;
-}
 
-root_t* get_expr_diff(const root_t* root) {
-    assert(root);
-    root_t* d_root = (root_t*)calloc(1, sizeof(root_t));
-    if (!d_root) {
-        LOG_FATAL("NO ROOT CALL\n");
-        return 0;
-    }
-    d_root->start = DIFF(root->start);
-    return d_root;
-}
-static math_node* get_diff (const math_node* node) {
-    if (!node) return 0;
-
-    if (node->type == NUM_T) return NUM_(0);
-    if (node->type == PAR_T) return NUM_(1);
-    if (node->type != OP_T) {
-        LOG_FATAL("STRANGE NODE\n");
-        return 0;
-    }
-    switch (node->type)
-    {
-    case ADD_T: return ADD_(DIFF(L_), DIFF(R_));
-    case SUB_T: return SUB_(DIFF(L_), DIFF(R_));
-    case MUL_T: return ADD_(MUL_(DIFF(L_), CPY(R_)), MUL_(CPY(L_), DIFF(R_)));
-    case DIV_T: return DIV_(SUB_(MUL_(DIFF(L_), CPY(R_)), MUL_(CPY(L_), DIFF(R_))), POW_(CPY(R_), NUM_(2)));
-    case  LN_T: return DIV_(DIFF(R_), CPY(R_));
-    case EXP_T: return MUL_(DIFF(R_), CPY(node));
-    case LOG_T: return DIV_(SUB_(DIV_(DIFF(L_), CPY(L_)), MUL_(DIV_(DIFF(R_), CPY(R_)), CPY(node))), LN_(CPY(R_)));
-    case POW_T: return ADD_(MUL_(CPY(node), MUL_(LN_(CPY(L_)), DIFF(R_))), MUL_(POW_(CPY(L_), SUB_(CPY(R_), NUM_(1))), MUL_(CPY(R_), DIFF(L_))));
-    case SIN_T: return MUL_(COS_(CPY(R_)), DIFF(R_));
-    case COS_T: return MUL_(SUB_(NUM_(0), SIN_(CPY(R_))), DIFF(R_));
-    case  SH_T: return MUL_( CH_(CPY(R_)), DIFF(R_));
-    case  CH_T: return MUL_( SH_(CPY(R_)), DIFF(R_));
-    case  TG_T: return MUL_(DIV_(NUM_(1), POW_(COS_(CPY(R_)), NUM_(2))), DIFF(R_));
-    case  TH_T: return MUL_(DIV_(NUM_(1), POW_( CH_(CPY(R_)), NUM_(2))), DIFF(R_));
-    default:
-        LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
-        break;
-    }
-    return 0;
-}
-int calc_expr(const root_t* root, int x_val, int* total) {
-    assert(root);
-    assert(total);
-
-    calc_node(root->start, x_val, total);
-    return 0;
-}
-
-static math_node* scan_node(const char* src);
 static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_node* right) {
     math_node* node = (math_node*)calloc(1, sizeof(math_node));
     if (!node) {
@@ -150,12 +217,16 @@ static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_no
     node->val   = val;
     return node;
 }
-static math_node* copy_node(const math_node* node) {
+static int        dtor_node(math_node* node) {
     if (!node) return 0;
-    return ctor_node(node->type, node->val, CPY(L_), CPY(R_));
+    dtor_node(L_);
+    dtor_node(R_);
+    free(node);
+    return 0;
 }
-static int calc_node  (const math_node* node, int x_val, int* total);
-int print_expr (const root_t* root, const char* file_name) {
+
+
+int        print_expr (const root_t* root, const char* file_name) {
     assert(root);
     assert(file_name);
 
@@ -165,11 +236,14 @@ int print_expr (const root_t* root, const char* file_name) {
         return 1;
     }
 
-    print_node(root->start, data);
-
-    FILE* output_std = fopen(file_name, "w");
-    fwrite(data, sizeof(char), MAX_EXPRESSION_SIZE, output_std);
-    fclose(output_std);
+    int size = print_node(root->start, data);
+    data[size] = '\n';
+    if (data[MAX_EXPRESSION_SIZE - 1]) LOG_FATAL("exceeded expression size\n");
+    else {
+        FILE* output_std = fopen(file_name, "a");
+        fwrite(data, sizeof(char), strlen(data), output_std);
+        fclose(output_std);
+    }
 
     free(data);
 
@@ -177,47 +251,50 @@ int print_expr (const root_t* root, const char* file_name) {
 }
 static int print_node (const math_node* node, char* dst) {
     assert(dst);
-    int delta = 0, global_delta;
+    int delta = 0, global_delta = 0;
     if (!node) {
-        sprintf(dst, "(N)%n", delta);
+        sprintf(dst, "(N)%n", &delta);
         return delta;
     }
     if (node->type == NUM_T) {
-        sprintf(dst, "(%d)%n", node->val, delta);
+        sprintf(dst, "(%d)%n", node->val, &delta);
         return delta;
     }
-    if (node->type == PAR_T) {
-        sprintf(dst, "(x)%n", delta);
+    if (node->type == VAR_T) {
+        sprintf(dst, "(x)%n", &delta);
         return delta;
     }
-    sprintf(dst, "(");
-    dst++;
-    global_delta++;
+
+    sprintf(dst, "(%n", &delta);
+    dst += delta;
+    global_delta += delta;
+
     delta = print_node(L_, dst);
     dst += delta;
     global_delta += delta;
-    switch (node->type)
+
+    switch ((OPERATORS_VALUES_T)node->val)
     {
-    case  ADD_T: {sprintf(dst,      "+%n", delta); break;}
-    case  SUB_T: {sprintf(dst,      "-%n", delta); break;}
-    case  MUL_T: {sprintf(dst,      "*%n", delta); break;}
-    case  DIV_T: {sprintf(dst,      "/%n", delta); break;}
-    case   LN_T: {sprintf(dst,     "ln%n", delta); break;}
-    case  EXP_T: {sprintf(dst,    "exp%n", delta); break;}
-    case  LOG_T: {sprintf(dst,    "log%n", delta); break;}
-    case  POW_T: {sprintf(dst,      "^%n", delta); break;}
-    case  SIN_T: {sprintf(dst,    "sin%n", delta); break;}
-    case  COS_T: {sprintf(dst,    "cos%n", delta); break;}
-    case   SH_T: {sprintf(dst,     "sh%n", delta); break;}
-    case   CH_T: {sprintf(dst,     "ch%n", delta); break;}
-    case   TG_T: {sprintf(dst,     "tg%n", delta); break;}
-    case   TH_T: {sprintf(dst,     "th%n", delta); break;}
-    case ASIN_T: {sprintf(dst, "arcsin%n", delta); break;}
-    case ACOS_T: {sprintf(dst, "arccos%n", delta); break;}
-    case  ATG_T: {sprintf(dst,  "arctg%n", delta); break;}
-    case  ASH_T: {sprintf(dst,  "arcsh%n", delta); break;}
-    case  ACH_T: {sprintf(dst,  "arcch%n", delta); break;}
-    case  ATH_T: {sprintf(dst,  "arcth%n", delta); break;}
+    case  ADD_T: {sprintf(dst,      "+%n", &delta); break;}
+    case  SUB_T: {sprintf(dst,      "-%n", &delta); break;}
+    case  MUL_T: {sprintf(dst,      "*%n", &delta); break;}
+    case  DIV_T: {sprintf(dst,      "/%n", &delta); break;}
+    case   LN_T: {sprintf(dst,     "ln%n", &delta); break;}
+    case  EXP_T: {sprintf(dst,    "exp%n", &delta); break;}
+    case  LOG_T: {sprintf(dst,    "log%n", &delta); break;}
+    case  POW_T: {sprintf(dst,      "^%n", &delta); break;}
+    case  SIN_T: {sprintf(dst,    "sin%n", &delta); break;}
+    case  COS_T: {sprintf(dst,    "cos%n", &delta); break;}
+    case   SH_T: {sprintf(dst,     "sh%n", &delta); break;}
+    case   CH_T: {sprintf(dst,     "ch%n", &delta); break;}
+    case   TG_T: {sprintf(dst,     "tg%n", &delta); break;}
+    case   TH_T: {sprintf(dst,     "th%n", &delta); break;}
+    case ASIN_T: {sprintf(dst, "arcsin%n", &delta); break;}
+    case ACOS_T: {sprintf(dst, "arccos%n", &delta); break;}
+    case ATAN_T: {sprintf(dst,  "arctg%n", &delta); break;}
+    case  ASH_T: {sprintf(dst,  "arcsh%n", &delta); break;}
+    case  ACH_T: {sprintf(dst,  "arcch%n", &delta); break;}
+    case  ATH_T: {sprintf(dst,  "arcth%n", &delta); break;}
     default:
         LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
         return -1;
@@ -228,7 +305,75 @@ static int print_node (const math_node* node, char* dst) {
     delta = print_node(R_, dst);
     dst += delta;
     global_delta += delta;
-    
+
+    sprintf(dst, ")%n", &delta);
+    global_delta += delta;
 
     return global_delta;
+}
+
+
+root_t*           get_expr_diff(const root_t* root) {
+    assert(root);
+    root_t* d_root = (root_t*)calloc(1, sizeof(root_t));
+    if (!d_root) {
+        LOG_FATAL("NO ROOT CALL\n");
+        return 0;
+    }
+    d_root->start = DIFF(root->start);
+    return d_root;
+}
+static math_node* get_node_diff(const math_node* node) {
+    if (!node) return 0;
+
+    if (node->type == NUM_T) return NUM_(0);
+    if (node->type == VAR_T) return NUM_(1);
+    if (node->type != OP_T) {
+        LOG_FATAL("STRANGE NODE\n");
+        return 0;
+    }
+
+    switch ((OPERATORS_VALUES_T)node->val)
+    {
+    case  ADD_T: return ADD_(DIFF(L_), DIFF(R_));
+    case  SUB_T: return SUB_(DIFF(L_), DIFF(R_));
+    case  MUL_T: return ADD_(MUL_(DIFF(L_), CPY(R_)), MUL_(CPY(L_), DIFF(R_)));
+    case  DIV_T: return DIV_(SUB_(MUL_(DIFF(L_), CPY(R_)), MUL_(CPY(L_), DIFF(R_))), POW_(CPY(R_), NUM_(2)));
+    case   LN_T: return DIV_(DIFF(R_), CPY(R_));
+    case  EXP_T: return MUL_(DIFF(R_), CPY(node));
+    case  LOG_T: return DIV_(SUB_(DIV_(DIFF(L_), CPY(L_)), MUL_(DIV_(DIFF(R_), CPY(R_)), CPY(node))), LN_(CPY(R_)));
+    case  POW_T: return ADD_(MUL_(CPY(node), MUL_(LN_(CPY(L_)), DIFF(R_))), MUL_(POW_(CPY(L_), SUB_(CPY(R_), NUM_(1))), MUL_(CPY(R_), DIFF(L_))));
+    case  SIN_T: return MUL_(COS_(CPY(R_)), DIFF(R_));
+    case  COS_T: return MUL_(SUB_(NUM_(0), SIN_(CPY(R_))), DIFF(R_));
+    case   SH_T: return MUL_( CH_(CPY(R_)), DIFF(R_));
+    case   CH_T: return MUL_( SH_(CPY(R_)), DIFF(R_));
+    case   TG_T: return MUL_(DIV_(NUM_(1), POW_(COS_(CPY(R_)), NUM_(2))), DIFF(R_));
+    case   TH_T: return MUL_(DIV_(NUM_(1), POW_( CH_(CPY(R_)), NUM_(2))), DIFF(R_));
+    // case ASIN_T: return DIV_(NUM_( 1), POW_(SUB_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
+    // case ACOS_T: return DIV_(NUM_(-1), POW_(SUB_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
+    // case ATAN_T: return DIV_(NUM_( 1), POW_(ADD_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
+    // case  ACH_T: return DIV_(NUM_( 1), POW_(SUB_(POW_(R_, NUM_(2)), NUM_(1)), NUM_(0.5)));
+    // case  ASH_T: return DIV_(NUM_( 1), POW_(ADD_(POW_(R_, NUM_(2)), NUM_(1)), NUM_(0.5)));
+    case  ATH_T: return DIV_(NUM_( 1), SUB_(NUM_(1), POW_(R_, NUM_(2))));
+    default:
+        LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
+        break;
+    }
+    return 0;
+}
+
+
+int calc_expr(const root_t* root, int x_val, int* total) {
+    assert(root);
+    assert(total);
+
+    // calc_node(root->start, x_val, total);
+    return 0;
+}
+// static int calc_node  (const math_node* node, int x_val, int* total);
+
+
+static math_node* copy_node(const math_node* node) {
+    if (!node) return 0;
+    return ctor_node(node->type, node->val, CPY(L_), CPY(R_));
 }

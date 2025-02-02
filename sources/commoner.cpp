@@ -56,10 +56,10 @@ void swap_memory_2(void* x1, void* x2, size_t size) {
     return;
 }
 
-void* get_i(void* data, size_t index, size_t num_of_elemenst, size_t size_of_elements) {
-    assert(index < num_of_elemenst);
-    return (void*)((size_t)data + index * size_of_elements);
-}
+// void* get_i(void* data, size_t index, size_t num_of_elemenst, size_t size_of_elements) {
+//     assert(index < num_of_elemenst);
+//     return (void*)((size_t)data + index * size_of_elements);
+// }
 
 int run_file_error(const char* file_name) {
     assert(file_name);

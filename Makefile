@@ -20,7 +20,7 @@ SOURCES = commoner main differentiator
 
 OBJECTS := $(patsubst %,$(O_PREFIX)%.o,$(SOURCES))
 
-HEADER_LIST =$(H_PREFIX)*.h $(STACK_HEADER)
+HEADER_LIST =$(H_PREFIX)*.h
 
 all: main
 
