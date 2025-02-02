@@ -80,6 +80,6 @@ root_t* get_expr_diff(const root_t* root);
 int     calc_expr    (const root_t* root, int x_val, int* result);
 
 int   print_expr(const root_t* root, const char* file_name);
-char* graph_expr(const root_t* node);
+char* graph_expr(const root_t* root);
 
 #endif // DIFFERENTIATOR_H

@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <ctype.h>
+#include <unistd.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include <colors.h>
 #include <commoner.h>
@@ -35,6 +37,7 @@
 #define L_ node->left
 #define R_ node->right
 //*________________________________________________________
+
 //*_________________DEFINITIONS____________________________
 static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_node* right);
 static int        dtor_node(math_node* node);
@@ -47,7 +50,7 @@ static math_node* get_node_diff (const math_node* node);
 static int calc_node  (const math_node* node, int x_val, int* total);
 
 static int print_node (const math_node* node, char* src);
-static int graph_node (const math_node* node, char* src);
+static int graph_node (const math_node* node, FILE* src, int* num);
 
 static int scan_node(const char* src, int* shift, math_node** node);
 static int scan_op  (const char* src, int* shift, int* val);
@@ -60,6 +63,8 @@ static const int MAX_OPERATOR_STR_SIZE =  20;
 static const int MAX_NUMBER_STR_SIZE   =  20;
 static const int MAX_VARIABLE_STR_SIZE =  20;
 
+static const int MAX_DOT_FILE_NAME_SIZE    = 100;
+static const int MAX_TERMINAL_REQUEST_SIZE = 500;
 
 int        scan_expr(root_t* root, const char* const file_name) {
     assert(file_name);
@@ -150,7 +155,7 @@ static int scan_op  (const char* src, int* shift, int* val) {
         return 1;
     }
 
-    for(size_t i = 0; i < sizeof OPERATORS; ++i) if (!strcmp(OPERATORS[i].name, operator_)) {
+    for(size_t i = 0; i < sizeof(OPERATORS) / sizeof(OPERATORS[0]); ++i) if (!strcmp(OPERATORS[i].name, operator_)) {
         *val = OPERATORS[i].value;
         return  0;
     }
@@ -283,31 +288,15 @@ static int print_node (const math_node* node, char* dst) {
     dst += delta;
     global_delta += delta;
 
-    switch ((OPERATORS_VALUES_T)node->val)
-    {
-    case  ADD_T: {sprintf(dst,      "+%n", &delta); break;}
-    case  SUB_T: {sprintf(dst,      "-%n", &delta); break;}
-    case  MUL_T: {sprintf(dst,      "*%n", &delta); break;}
-    case  DIV_T: {sprintf(dst,      "/%n", &delta); break;}
-    case   LN_T: {sprintf(dst,     "ln%n", &delta); break;}
-    case  EXP_T: {sprintf(dst,    "exp%n", &delta); break;}
-    case  LOG_T: {sprintf(dst,    "log%n", &delta); break;}
-    case  POW_T: {sprintf(dst,      "^%n", &delta); break;}
-    case  SIN_T: {sprintf(dst,    "sin%n", &delta); break;}
-    case  COS_T: {sprintf(dst,    "cos%n", &delta); break;}
-    case   SH_T: {sprintf(dst,     "sh%n", &delta); break;}
-    case   CH_T: {sprintf(dst,     "ch%n", &delta); break;}
-    case   TG_T: {sprintf(dst,     "tg%n", &delta); break;}
-    case   TH_T: {sprintf(dst,     "th%n", &delta); break;}
-    case ASIN_T: {sprintf(dst, "arcsin%n", &delta); break;}
-    case ACOS_T: {sprintf(dst, "arccos%n", &delta); break;}
-    case ATAN_T: {sprintf(dst,  "arctg%n", &delta); break;}
-    case  ASH_T: {sprintf(dst,  "arcsh%n", &delta); break;}
-    case  ACH_T: {sprintf(dst,  "arcch%n", &delta); break;}
-    case  ATH_T: {sprintf(dst,  "arcth%n", &delta); break;}
-    default:
-        LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
-        return -1;
+    for (size_t i = 0; i < sizeof(OPERATORS) / sizeof(OPERATORS[0]); ++i) {
+        if ((OPERATORS_VALUES_T)node->val == OPERATORS[i].value) {
+            sprintf(dst, "%s%n", OPERATORS[i].name, &delta);
+            break;
+        }
+        else if (i == sizeof(OPERATORS) / sizeof(OPERATORS[0]) - 1) {
+            LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
+            return -1;
+        }
     }
     dst += delta;
     global_delta += delta;
@@ -568,6 +557,74 @@ static int simplify_node(math_node** place) {
     default:
         LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
         return 0;
+    }
+    return 0;
+}
+
+char* graph_expr(const root_t* root) {
+    assert(root);
+
+    timeval current_time;
+    gettimeofday(&current_time, NULL);
+
+    char* dot_file = (char*)calloc(MAX_DOT_FILE_NAME_SIZE, 1);
+    char* svg_file = (char*)calloc(MAX_DOT_FILE_NAME_SIZE, 1);
+    sprintf(dot_file, "graphs/%ld_%ld.dot", current_time.tv_sec, current_time.tv_usec);
+    sprintf(svg_file, "graphs/%ld_%ld.svg", current_time.tv_sec, current_time.tv_usec);
+
+    FILE* std_dot = fopen(dot_file, "w");
+
+    const char begin_dot[] = "\
+graph expr\n\
+{\n\
+    bgcolor=\"0\"\n\
+    node[fontname=\"impact\"; penwidth=5; fontsize=\"25\"]\n\
+    edge[fontname=\"Helvetica,Arial,sans-serif\"; color=\"#FF5E00\"; penwidth=4]\n\
+    node[fontcolor=\"#A2FF05\"; color=\"#F52789\"; shape=Mrecord]\n\
+    ";
+
+    fprintf(std_dot, "%s", begin_dot);
+    int num = 0;
+    if (graph_node(root->start, std_dot, &num)) {
+        LOG_FATAL("error during graph construction attempt");
+        free(dot_file);
+        free(svg_file);
+        return 0;
+    }
+    fprintf(std_dot, "}\n");
+
+    fclose(std_dot);
+
+    char term_request[MAX_TERMINAL_REQUEST_SIZE] = {};
+    sprintf(term_request, "dot %s -Tsvg -o %s", dot_file, svg_file);
+    system(term_request);
+
+    free(dot_file);
+
+    return svg_file;
+}
+static int graph_node (const math_node* node, FILE* dot_std, int* num) {
+    if (!node) return 0;
+    (*num)++;
+    int current_node_num = *num;
+    if      (node->type == NUM_T) fprintf(dot_std, "\tn%d [label=\"%d\"; fontcolor=\"#00fefc\"; color=\"#DD0EFF\"; shape=box]\n",    current_node_num, node->val);
+    else if (node->type == VAR_T) fprintf(dot_std, "\tn%d [label=\"X\" ; fontcolor=\"#FF3131\"; color=\"#7D12FF\"; shape=circle]\n", current_node_num);
+    else {
+        for(size_t i = 0; i < sizeof(OPERATORS) / sizeof(OPERATORS[0]); ++i) {
+            if (OPERATORS[i].value == node->val) {
+                fprintf(dot_std, "\tn%d [label=\"%s\"]\n", current_node_num, OPERATORS[i]);
+                break;
+            }
+            else if (i == sizeof(OPERATORS) / sizeof(OPERATORS[0]) - 1) {
+                LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
+                return 1;
+            }
+        }
+
+        if (L_) fprintf(dot_std, "\tn%d -- n%d\n", current_node_num, *num + 1);
+        graph_node(L_, dot_std, num);
+        if (R_) fprintf(dot_std, "\tn%d -- n%d\n", current_node_num, *num + 1);
+        graph_node(R_, dot_std, num);
     }
     return 0;
 }

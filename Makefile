@@ -10,6 +10,7 @@ ded_flags = -Wshadow -Winit-self -Wredundant-decls -Wcast-align -Wundef \
 
 .phony: all clean intall uninstall
 
+G_PREFIX = graphs/
 B_PREFIX = bin/
 O_PREFIX = objects/
 S_PREFIX = sources/
@@ -36,4 +37,4 @@ $(O_PREFIX)%.o: $(S_PREFIX)%.cpp $(HEADER_LIST)
 	@gcc $(ded_flags) -I $(H_PREFIX) $< -c -o $@
 
 clean:
-	rm -rf $(O_PREFIX)*.o $(B_PREFIX)*.exe
+	rm -rf $(O_PREFIX)*.o $(B_PREFIX)*.exe $(G_PREFIX)*

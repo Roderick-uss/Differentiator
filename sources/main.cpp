@@ -1,4 +1,5 @@
 #include<stdio.h>
+#include<stdlib.h>
 
 #include "commoner.h"
 #include "differentiator.h"
@@ -27,6 +28,10 @@ int main() {
     root_t* d2_expr = get_expr_diff(d1_expr);
     LOG_INFO("D2 " YELLOW "%p\n", d2_expr);
     print_expr(d2_expr, output_file);
+
+    free(graph_expr(d0_expr));
+    free(graph_expr(d1_expr));
+    free(graph_expr(d2_expr));
 
     dtor_expr(d0_expr);
     dtor_expr(d1_expr);
