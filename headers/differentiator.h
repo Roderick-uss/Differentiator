@@ -70,14 +70,16 @@ struct root_t {
 };
 
 
-root_t* ctor_expr ();
-int     dtor_expr (root_t* root);
+root_t* ctor_expr();
+int     dtor_expr(root_t* root);
+//todo verify
 
 int scan_expr(root_t* root, const char* const file_name);
 
-root_t* get_expr_diff (const root_t* root);
-int calc_expr (const root_t* root, int x_val, int* result);
+root_t* get_expr_diff(const root_t* root);
+int     calc_expr    (const root_t* root, int x_val, int* result);
 
-int print_expr (const root_t* root, const char* file_name);
+int   print_expr(const root_t* root, const char* file_name);
+char* graph_expr(const root_t* node);
 
 #endif // DIFFERENTIATOR_H

@@ -9,6 +9,7 @@
 #include <commoner.h>
 #include <differentiator.h>
 
+//todo separate file with nodes(all static functions)
 //*__________________________DSL___________________________
 #define NUM_(val)         ctor_node(NUM_T, val,  NULL,  NULL)
 #define VAR_              ctor_node(VAR_T,   1,  NULL,  NULL)
@@ -19,7 +20,7 @@
 #define LOG_(left, right) ctor_node(OP_T, LOG_T, left, right)
 #define POW_(left, right) ctor_node(OP_T, POW_T, left, right)
 #define EXP_(right)       ctor_node(OP_T, EXP_T, NULL, right)
-#define  LN_(right)       ctor_node(OP_T, ADD_T, NULL, right)
+#define  LN_(right)       ctor_node(OP_T,  LN_T, NULL, right)
 #define SIN_(right)       ctor_node(OP_T, SIN_T, NULL, right)
 #define COS_(right)       ctor_node(OP_T, COS_T, NULL, right)
 #define  TG_(right)       ctor_node(OP_T,  TG_T, NULL, right)
@@ -34,22 +35,31 @@
 #define L_ node->left
 #define R_ node->right
 //*________________________________________________________
+//*_________________DEFINITIONS____________________________
+static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_node* right);
+static int        dtor_node(math_node* node);
+//todo verify
+
+static math_node* copy_node(const math_node* node);
+static int simplify_node(math_node** place);
+
+static math_node* get_node_diff (const math_node* node);
+static int calc_node  (const math_node* node, int x_val, int* total);
+
+static int print_node (const math_node* node, char* src);
+static int graph_node (const math_node* node, char* src);
+
+static int scan_node(const char* src, int* shift, math_node** node);
+static int scan_op  (const char* src, int* shift, int* val);
+static int scan_num (const char* src, int* shift, int* val);
+static int scan_var (const char* src, int* shift, int* val);
+//*________________________________________________________
 
 static const int MAX_EXPRESSION_SIZE   = 500;
 static const int MAX_OPERATOR_STR_SIZE =  20;
 static const int MAX_NUMBER_STR_SIZE   =  20;
 static const int MAX_VARIABLE_STR_SIZE =  20;
 
-static math_node* ctor_node(NODE_TYPES_T type, int val, math_node* left, math_node* right);
-static math_node* copy_node(const math_node* node);
-static math_node* get_node_diff (const math_node* node);
-static int scan_node(const char* src, int* shift, math_node** node);
-static int scan_op  (const char* src, int* shift, int*        val );
-static int scan_num (const char* src, int* shift, int*        val );
-static int scan_var (const char* src, int* shift, int*        val );
-static int print_node (const math_node* node, char* src);
-static int dtor_node  (math_node* node);
-static int calc_node  (const math_node* node, int x_val, int* total);
 
 int        scan_expr(root_t* root, const char* const file_name) {
     assert(file_name);
@@ -112,7 +122,7 @@ static int scan_node(const char* src, int* shift, math_node** place) {
         LOG_PURPLE("shift : %d\n", *shift);
         if (scan_node(src, shift, &R_       )) return 1;
     }
-    else if(isdigit(src[*shift]) || isdigit(src[*shift + 1]) && (src[*shift] == '+' || src[*shift] == '-')) {
+    else if(isdigit(src[*shift]) || (isdigit(src[*shift + 1]) && (src[*shift] == '+' || src[*shift] == '-'))) {
         node->type = NUM_T;
         if (scan_num (src, shift, &node->val)) return 1;
     }
@@ -315,12 +325,14 @@ static int print_node (const math_node* node, char* dst) {
 
 root_t*           get_expr_diff(const root_t* root) {
     assert(root);
-    root_t* d_root = (root_t*)calloc(1, sizeof(root_t));
-    if (!d_root) {
-        LOG_FATAL("NO ROOT CALL\n");
-        return 0;
-    }
+    root_t* d_root = ctor_expr();
+
+    if (!d_root) return 0;
+
     d_root->start = DIFF(root->start);
+
+    simplify_node(&d_root->start);
+
     return d_root;
 }
 static math_node* get_node_diff(const math_node* node) {
@@ -349,12 +361,12 @@ static math_node* get_node_diff(const math_node* node) {
     case   CH_T: return MUL_( SH_(CPY(R_)), DIFF(R_));
     case   TG_T: return MUL_(DIV_(NUM_(1), POW_(COS_(CPY(R_)), NUM_(2))), DIFF(R_));
     case   TH_T: return MUL_(DIV_(NUM_(1), POW_( CH_(CPY(R_)), NUM_(2))), DIFF(R_));
-    // case ASIN_T: return DIV_(NUM_( 1), POW_(SUB_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
-    // case ACOS_T: return DIV_(NUM_(-1), POW_(SUB_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
-    // case ATAN_T: return DIV_(NUM_( 1), POW_(ADD_(NUM_(1), POW_(R_, NUM_(2))), NUM_(0.5)));
-    // case  ACH_T: return DIV_(NUM_( 1), POW_(SUB_(POW_(R_, NUM_(2)), NUM_(1)), NUM_(0.5)));
-    // case  ASH_T: return DIV_(NUM_( 1), POW_(ADD_(POW_(R_, NUM_(2)), NUM_(1)), NUM_(0.5)));
-    case  ATH_T: return DIV_(NUM_( 1), SUB_(NUM_(1), POW_(R_, NUM_(2))));
+    // case ASIN_T: return MUL_(DIV_(NUM_( 1), POW_(SUB_(NUM_(1), POW_(CPY(R_), NUM_(2))), NUM_(0.5))), DIFF(R_));
+    // case ACOS_T: return MUL_(DIV_(NUM_(-1), POW_(SUB_(NUM_(1), POW_(CPY(R_), NUM_(2))), NUM_(0.5))), DIFF(R_));
+    // case ATAN_T: return MUL_(DIV_(NUM_( 1), POW_(ADD_(NUM_(1), POW_(CPY(R_), NUM_(2))), NUM_(0.5))), DIFF(R_));
+    // case  ACH_T: return MUL_(DIV_(NUM_( 1), POW_(SUB_(POW_(CPY(R_), NUM_(2)), NUM_(1)), NUM_(0.5))), DIFF(R_));
+    // case  ASH_T: return MUL_(DIV_(NUM_( 1), POW_(ADD_(POW_(CPY(R_), NUM_(2)), NUM_(1)), NUM_(0.5))), DIFF(R_));
+    case  ATH_T: return MUL_(DIV_(NUM_( 1), SUB_(NUM_(1), POW_(CPY(R_), NUM_(2)))), DIFF(R_));
     default:
         LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
         break;
@@ -372,8 +384,190 @@ int calc_expr(const root_t* root, int x_val, int* total) {
 }
 // static int calc_node  (const math_node* node, int x_val, int* total);
 
-
 static math_node* copy_node(const math_node* node) {
     if (!node) return 0;
     return ctor_node(node->type, node->val, CPY(L_), CPY(R_));
+}
+
+static int simplify_node(math_node** place) {
+    assert(place);
+
+    math_node* node = *place;
+
+    if (!node || node->type != OP_T) return 0;
+
+    if (simplify_node(&L_)) return 1;
+    if (simplify_node(&R_)) return 1;
+
+    // {
+    // char* data = (char*)calloc(MAX_EXPRESSION_SIZE, 1);
+    // print_node(node, data);
+    // printf("%s\n", data);
+    // free (data);
+    // }
+
+    int lval = L_ ? L_->val : 0;
+    int rval = R_ ? R_->val : 0;
+
+    switch ((OPERATORS_VALUES_T)node->val)
+    {
+    case  ADD_T:
+    {
+        if      (L_->type == NUM_T && R_->type == NUM_T) {*place = NUM_(lval + rval); dtor_node(node);}
+        else if (L_->type == NUM_T && lval == 0)         {*place = CPY(R_)          ; dtor_node(node);}
+        else if (R_->type == NUM_T && rval == 0)         {*place = CPY(L_)          ; dtor_node(node);}
+        break;
+    }
+    case  SUB_T:
+    {
+        if      (L_->type == NUM_T && R_->type == NUM_T) {*place = NUM_(lval - rval); dtor_node(node);}
+        else if (R_->type == NUM_T && rval == 0)         {*place = CPY(L_)          ; dtor_node(node);}
+        break;
+    }
+    case  MUL_T:
+    {
+        if      (L_->type == NUM_T && R_->type == NUM_T) {*place = NUM_(lval * rval); dtor_node(node);}
+        else if (R_->type == NUM_T) {
+            if      (rval ==  1) {*place = CPY(L_)               ; dtor_node(node);}
+            else if (rval == -1) {*place = SUB_(NUM_(0), CPY(L_)); dtor_node(node);}
+            else if (rval ==  0) {*place = NUM_(0)               ; dtor_node(node);}
+        }
+        else if (L_->type == NUM_T) {
+            if      (lval ==  1) {*place = CPY(R_)               ; dtor_node(node);}
+            else if (lval == -1) {*place = SUB_(NUM_(0), CPY(R_)); dtor_node(node);}
+            else if (lval ==  0) {*place = NUM_(0)               ; dtor_node(node);}
+        }
+        break;
+    }
+    case  DIV_T:
+    {
+        if      (R_->type == NUM_T && rval == 0) {LOG_FATAL("ZERO DIVISION\n"); return 1     ;}
+
+        if (L_->type == NUM_T && lval == 0)                                 {*place = NUM_(0)          ; dtor_node(node);}
+        else if (R_->type == NUM_T && rval == 1)                            {*place = CPY(L_)          ; dtor_node(node);}
+        else if (L_->type == NUM_T && R_->type == NUM_T && lval % rval == 0) {*place = NUM_(lval / rval); dtor_node(node);}
+        break;
+    }
+    case   LN_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {LOG_FATAL("ZERO LN\n"); return 1       ;}
+        if (rval == 1) {*place = NUM_(0)      ; dtor_node(node);}
+        //else           {*place = NUM_(log(rval))      ; dtor_node(node);}
+        break;
+    }
+    case  EXP_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(1); dtor_node(node);}
+        //else           {*place = NUM_(pow(e, rval)); dtor_node(node);}
+        break;
+    }
+    case  LOG_T:
+    {
+        if (R_->type == NUM_T && (rval == 0 || rval == 1)) {LOG_FATAL("LOG BASE ERROR\n"); return 1;}
+        if (L_->type != NUM_T) break;
+        if      (lval == 0)        {LOG_FATAL("ZERO LOG\n")             ; return 1       ;}
+        else if (lval == 1)        {*place = NUM_(0)                    ; dtor_node(node);}
+        //else if (R_->type == NUM_T) {*place = NUM_(log(lval) / log(rval)); dtor_node(node);}
+        break;
+    }
+    case  POW_T:
+    {
+        if (L_->type == NUM_T && R_->type == NUM_T && lval == 0 && rval == 0) {LOG_FATAL("uncertainty 0 0\n"); return 1;}
+        if (L_->type == NUM_T && (lval == 0 || lval == 1)) {*place = NUM_(lval); dtor_node(node);}
+        else if (R_->type == NUM_T && rval == 0)           {*place = NUM_(1)   ; dtor_node(node);}
+        else if (R_->type == NUM_T && rval == 1)           {*place = CPY(L_)   ; dtor_node(node);}
+        //else if (L_->type == NUM_T && R_->type == NUM_T)    {*place = NUM_(pow(lval, rval)); dtor_node(node);}
+        break;
+    }
+    case  SIN_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = sin(rval); dtor_node(node);}
+        break;
+    }
+    case  COS_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(1); dtor_node(node);}
+        //else           {*place = NUM_(cos(rval)); dtor_node(node);}
+        break;
+    }
+    case   SH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(sinh(rval)); dtor_node(node);}
+        break;
+    }
+    case   CH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(1); dtor_node(node);}
+        //else           {*place = NUM_(cosh(rval)); dtor_node(node);}
+        break;
+    }
+    case   TG_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(tan(rval)); dtor_node(node);}
+        break;
+    }
+    case   TH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(tanh(rval)); dtor_node(node);}
+        break;
+    }
+    case ASIN_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(asin(rval)); dtor_node(node);}
+        break;
+    }
+    case ACOS_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 1) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(acos(rval)); dtor_node(node);}
+        break;
+    }
+    case ATAN_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(atan(rval)); dtor_node(node);}
+        break;
+    }
+    case  ASH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(asinh(rval)); dtor_node(node);}
+        break;
+    }
+    case  ACH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(1); dtor_node(node);}
+        //else           {*place = NUM_(acosh(rval)); dtor_node(node);}
+        break;
+    }
+    case  ATH_T:
+    {
+        if (R_->type != NUM_T) break;
+        if (rval == 0) {*place = NUM_(0); dtor_node(node);}
+        //else           {*place = NUM_(atanh(rval)); dtor_node(node);}
+        break;
+    }
+    default:
+        LOG_FATAL("UNKNOWN OPERATION: %d\n", node->val);
+        return 0;
+    }
+    return 0;
 }
